@@ -1,8 +1,29 @@
-/*
+.visual-aid-link {
+    color: blue;
+    text-decoration: underline dashed blue;
+    cursor: pointer;
+}
 
-This CSS file will be included with your plugin, and
-available in the app when your plugin is enabled.
+.visual-aid-hover {
+    visibility: hidden;
+    /*max-height: 300px;*/
+    max-width: 300px;
+    background-color: black;
+    padding: 5px 3px;
+    border-radius: 6px;
 
-If your plugin does not need CSS, delete this file.
+    /* Position the tooltip text - see examples below! */
+    position: absolute;
+    transform: translateX(50px);
+    z-index: 1;
+}
 
-*/
+/* Show the tooltip text when you mouse over the tooltip container */
+.visual-aid-link:hover .visual-aid-hover {
+    visibility: visible;
+}
+
+.visual-aid-hover-img {
+    height: 100%;
+    width: 100%;
+}
