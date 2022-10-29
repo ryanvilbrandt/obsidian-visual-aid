@@ -1,7 +1,9 @@
 .visual-aid-link {
-    color: blue;
-    text-decoration: underline dashed blue;
-    cursor: pointer;
+    text-decoration: underline dashed;
+}
+
+.internal-link.visual-aid-link.is-unresolved {
+    text-decoration: underline dashed;
 }
 
 .visual-aid-hover {

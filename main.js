@@ -6,46 +6,27 @@ const DEFAULT_SETTINGS = {
     "web_host": "mywiki.zapto.org",
     "username": "",
     "password": "",
+    "local_images_folder": "Visual Aids",
+    "remote_images_folder": "",
 };
 
 class VisualAidPlugin extends obsidian.Plugin {
     async onload() {
         new Notice("Enabled");
         this.registerMarkdownPostProcessor(async (el, ctx) => {
-            console.log("==============");
             const a_elements = el.querySelectorAll("a");
             for (let index = 0; index < a_elements.length; index++) {
                 // Retrieve URL and text from original <a>
                 const a_element = a_elements.item(index);
-                let href = a_element.getAttribute("href");
-                if (!href)
-                    continue;
-                let href_start = href[0];
-                let href_end = href.substring(1, href.length);
                 const link_text = a_element.innerText;
-                // Check for specifically either visual aid or soundboard
-                let title, inner_html;
-                if (href_start === "^") {
-                    title = `visual_aid|${href_end}|${link_text}`;
-                    const url = !href_end.startsWith("http") ? `${SERVER}/media/img/visual_aids/${href_end}` : href_end;
-                    const hover_panel = `<span class="visual-aid-hover"><img class="visual-aid-hover-img" src="${url}"></span>`;
-                    inner_html = `${link_text}${hover_panel}`;
-                } else if (href_start === "$") {
-                    title = href_end;
-                    inner_html = link_text;
-                } else {
+                if (!link_text.endsWith("^"))
                     continue;
-                }
-                // Replace <a> with span
-                const link_span = document.createElement("span");
-                link_span.className = "visual-aid-link";
-                link_span.title = title;
-                link_span.innerHTML = inner_html;
-                link_span.onclick = (event) => set_visual_aid(event, link_span.title, this.settings);
-                insertAfter(link_span, a_element);
-                a_element.parentNode.removeChild(a_element);
+                // Remove caret from link text
+                a_element.innerText = link_text.substring(0, link_text.length - 1);
+                a_element.classList.add("visual-aid-link");
+                a_element.onclick = (event) => set_visual_aid(event, this.settings);
             }
-            // console.log(el);
+            console.log(el);
         });
         await this.loadSettings();
     }
@@ -68,37 +49,30 @@ function insertAfter(newNode, referenceNode) {
     referenceNode.parentNode.insertBefore(newNode, referenceNode.nextSibling);
 }
 
-function set_visual_aid(event, value, settings) {
-    let array = value.split("|");
-    let action = array[0]
-    let params = {
-        "action": action,
-        "player_soundboard": false
-    };
-    if (action === "visual_aid") {
-        let url = array[1];
-        if (url && !url.startsWith("http")) {
-            url = `${settings.web_host}/media/img/visual_aids/${url}`;
-        }
-        let title = array.length >= 3 ? array[2] : "";
-        params["url"] = url;
-        params["title"] = event.altKey ? title : "";
-    } else if (action === "iframe") {
-        params["url"] = array[1];
+async function set_visual_aid(event, settings) {
+    event.preventDefault();
+    event.stopPropagation();
+    let formData = new FormData();
+    formData.append("action", "visual_aid");
+    formData.append("player_soundboard", false);
+    formData.append("title", event.altKey ? event.target.innerText : "");
+    let href = event.target.getAttribute("href");
+    const class_list = event.target.classList;
+    if (class_list.contains("internal-link")) {
+        formData.append("url", `http://${settings.web_host}/media/img/visual_aids/${settings.remote_images_folder}/${href}`);
+        if (!class_list.contains("is-unresolved"))
+            // If internal link is resolved, check if we need to upload the file to the visual aid server first
+            await upload_visual_aid(href, settings);
+    } else if (class_list.contains("external-link")) {
+        formData.append("url", href);
     } else {
-        params["target"] = array[1];
-        if (array.length === 3) {
-            let url = array[2];
-            if (url && !url.startsWith("http")) {
-                url = `${settings.web_host}/media/audio/${url}`;
-            }
-            params["url"] = url;
-        }
+        console.error(`Invalid classList: ${class_list}`);
     }
+    console.log(formData);
     if (event.ctrlKey) {
-        set_visual_aid_response(params["url"]);
+        set_visual_aid_response(formData.get("url"));
     } else {
-        ajax_call(`${settings.web_host}/set_visual_aid`, null, params, null, true, settings);
+        await fetch_visual_aid("set_visual_aid", "POST", formData, settings);
     }
 }
 
@@ -108,42 +82,51 @@ function set_visual_aid_response(url) {
     }
 }
 
-function ajax_call(url, func, params=null, error_func=null, auth=false, settings=null) {
-    const xhttp = new XMLHttpRequest();
-    xhttp.onreadystatechange = function() {
-        if (this.readyState === 4) {
-            if (this.status === 200) {
-                if (func) {
-                    func(this);
-                }
-            } else {
-                console.error(xhttp);
-                if (error_func) {
-                    error_func(this);
-                }
+async function upload_visual_aid(filename, settings) {
+    const local_path = `${settings.local_images_folder}/${filename}`;
+    console.log(local_path);
+    const remote_path = `${settings.remote_images_folder}/${filename}`;
+    const abstract_file = app.vault.getAbstractFileByPath(local_path);
+    console.log(abstract_file);
+    const content = await app.vault.readBinary(abstract_file);
+    console.log(content);
+    // Check with the webserver if we need to upload the image
+    let formData = new FormData();
+    formData.append("target_path", remote_path);
+    formData.append("image_size", content.byteLength);
+    let r = await fetch_visual_aid("check_visual_aid", "POST", formData, settings);
+    console.log(r);
+    const j = await r.json();
+    console.log(j);
+    if (j["size_matches"])
+        // The file exists and is the same size. Don't bother uploading.
+        // TODO compare md5 hash
+        return;
+    const image_type = `image/${abstract_file.extension}`
+    let blob = new Blob([new Uint8Array(content)],{type: image_type})
+    console.log(blob);
+    const file = new File([blob], filename,{type: image_type});
+    console.log(file);
+    formData = new FormData();
+    formData.append("image", file);
+    formData.append("target_path", remote_path);
+    await fetch_visual_aid("upload_visual_aid", "PUT", formData, settings);
+}
+
+async function fetch_visual_aid(url, method, formData, settings) {
+    const credentials = btoa(settings.username + ":" + settings.password);
+    let r = await fetch(
+        `http://${settings.web_host}/${url}`,
+        {
+            method: method,
+            body: formData,
+            headers: {
+                "Authorization": "Basic " + credentials,
             }
         }
-    };
-    xhttp.open(params === null ? "GET" : "POST", url, true);
-    xhttp.setRequestHeader("X-Requested-With", "XMLHttpRequest");
-    if (auth) {
-        const credentials = btoa(settings.username + ":" + settings.password);
-        xhttp.setRequestHeader ("Authorization", "Basic " + credentials);
-    }
-    if (params === null) {
-        xhttp.send();
-    } else {
-        let post_params;
-        if (typeof params === "string") {
-            post_params = params;
-        } else {
-            post_params = Object.keys(params).map(
-                k => encodeURIComponent(k) + "=" + encodeURIComponent(params[k])
-            ).join("&");
-        }
-        xhttp.setRequestHeader("Content-Type", "application/x-www-form-urlencoded");
-        xhttp.send(post_params);
-    }
+    );
+    console.log('HTTP response code:', r.status);
+    return r;
 }
 
 class VisualAidSettingsTab extends obsidian.PluginSettingTab {
@@ -186,6 +169,29 @@ class VisualAidSettingsTab extends obsidian.PluginSettingTab {
                 .setValue(this.plugin.settings.password)
                 .onChange(async (value) => {
                     this.plugin.settings.password = value;
+                    await this.plugin.saveSettings();
+                })
+            );
+        // Local visual aid images folder
+        new obsidian.Setting(containerEl)
+            .setName("Visual aid images folder (local)")
+            .setDesc("The name of the folder where you store all your visual aid images on Obsidian")
+            .addText(text => text
+                .setValue(this.plugin.settings.local_images_folder)
+                .onChange(async (value) => {
+                    this.plugin.settings.local_images_folder = value;
+                    await this.plugin.saveSettings();
+                })
+            );
+        // Remote visual aid images folder
+        new obsidian.Setting(containerEl)
+            .setName("Visual aid images folder (remote)")
+            .setDesc("The name of the folder where you store all your visual aid images on the visual aid server")
+            .addText(text => text
+                .setValue(this.plugin.settings.remote_images_folder)
+                .setPlaceholder("e.g. curse_of_strahd")
+                .onChange(async (value) => {
+                    this.plugin.settings.remote_images_folder = value;
                     await this.plugin.saveSettings();
                 })
             );
