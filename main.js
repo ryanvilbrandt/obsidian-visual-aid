@@ -21,6 +21,10 @@ class VisualAidPlugin extends obsidian.Plugin {
             }
             console.debug(el);
         });
+        this.registerMarkdownCodeBlockProcessor("audio-file", (source, el, ctx) => {
+            console.log(this.settings);
+            init_audio_file_block(source, el, ctx, this.settings);
+        });
         await this.loadSettings();
     }
     onunload() {
@@ -50,6 +54,58 @@ function init_visual_aid_link(element, settings) {
     }
 }
 
+function init_audio_file_block(source, el, ctx, settings) {
+    // Determine filename and looping rules
+    let source_lines = source.split("\n");
+    const commands = source_lines[0].split("|");
+    const filename = commands.at(-1);
+    const display_name = filename.split(".")[0];
+    let action, sound_type;
+    // Action: load, play, pause, or stop
+    if (commands.contains("play"))
+        action = "play";
+    else if (commands.contains("pause"))
+        action = "pause";
+    else if (commands.contains("stop"))
+        action = "stop";
+    else
+        action = "load";
+    // Sound type: music, ambience, or effect
+    if (commands.contains("ambience"))
+        sound_type = "ambience";
+    else if (commands.contains("effect"))
+        sound_type = "effect";
+    else if (commands.contains("all"))
+        sound_type = "all";
+    else
+        sound_type = "music";
+    console.debug(`display_name=${display_name} | filename=${filename} | action=${action} | sound_type=${sound_type}`);
+    // Create nodes
+    const blockquote = document.createElement("blockquote");
+    const audio_link = document.createElement("a");
+    if (action === "load") {
+        const play_span = document.createElement("span");
+        play_span.innerHTML = `<strong>Load ${sound_type}:</strong> `;
+        blockquote.appendChild(play_span);
+        audio_link.innerText = display_name;
+        audio_link.href = `${action}|${sound_type}|${filename}`;
+    } else {
+        audio_link.innerText = `${toTitleCase(action)} ${sound_type}`;
+        audio_link.href = `${action}|${sound_type}`;
+    }
+    console.log(audio_link);
+    audio_link.onclick = (event) => set_audio_file(event, settings);
+    blockquote.appendChild(audio_link);
+    el.appendChild(blockquote);
+    console.debug(el);
+}
+
+
+function toTitleCase(s) {
+    return s.charAt(0).toUpperCase() + s.toLowerCase().slice(1);
+}
+
+
 async function set_visual_aid(event, settings) {
     event.preventDefault();
     event.stopPropagation();
@@ -78,6 +134,34 @@ async function set_visual_aid(event, settings) {
         await fetch_visual_aid("set_visual_aid", "POST", formData, settings);
     }
 }
+
+
+async function set_audio_file(event, settings) {
+    event.preventDefault();
+    event.stopPropagation();
+    console.log(settings);
+    let commands = event.target.href;
+    commands = commands.split(document.domain)[1].slice(1).replace(/%7C/g, "|");
+    console.log(commands)
+    const commands_list = commands.split("|");
+    console.log(commands_list);
+    let formData = new FormData();
+    formData.append("action", commands_list[0]);
+    formData.append("target", commands_list[1]);
+    let url = null;
+    if (commands_list.length === 3) {
+        url = `media/audio/${settings.remote_images_folder}/${commands_list[2]}`;
+    }
+    formData.append("url", url);
+    console.log(formData);
+    let r = await fetch_visual_aid("set_visual_aid", "POST", formData, settings);
+    if (r === null) {
+        new Notice(`Visual aid call to set_visual_aid failed`);
+    } else {
+        new Notice(`Sent ${commands} to visual aid`);
+    }
+}
+
 
 function set_visual_aid_response(url) {
     if (url) {
@@ -146,8 +230,13 @@ async function fetch_visual_aid(url, method, formData, settings) {
             }
         }
     ).then((response) => {
-        console.debug('HTTP response code:', response.status);
-        return response;
+        if (response.ok) {
+            console.debug('HTTP response code:', response.status);
+            return response;
+        } else {
+            console.error('HTTP error:', response.statusText);
+            return null;
+        }
     })
     .catch((error) => {
         console.error(error);
