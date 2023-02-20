@@ -12,26 +12,19 @@ const DEFAULT_SETTINGS = {
 
 class VisualAidPlugin extends obsidian.Plugin {
     async onload() {
-        new Notice("Enabled");
+        new Notice("Visual Aid Controller enabled");
         this.registerMarkdownPostProcessor(async (el, ctx) => {
             const a_elements = el.querySelectorAll("a");
             for (let index = 0; index < a_elements.length; index++) {
                 // Retrieve URL and text from original <a>
-                const a_element = a_elements.item(index);
-                const link_text = a_element.innerText;
-                if (!link_text.endsWith("^"))
-                    continue;
-                // Remove caret from link text
-                a_element.innerText = link_text.substring(0, link_text.length - 1);
-                a_element.classList.add("visual-aid-link");
-                a_element.onclick = (event) => set_visual_aid(event, this.settings);
+                init_visual_aid_link(a_elements.item(index), this.settings);
             }
-            console.log(el);
+            console.debug(el);
         });
         await this.loadSettings();
     }
     onunload() {
-        new Notice("Disabled");
+        new Notice("Visual Aid Controller disabled");
     }
     // Load the settings.
     async loadSettings() {
@@ -45,8 +38,16 @@ class VisualAidPlugin extends obsidian.Plugin {
 }
 module.exports = VisualAidPlugin;
 
-function insertAfter(newNode, referenceNode) {
-    referenceNode.parentNode.insertBefore(newNode, referenceNode.nextSibling);
+function init_visual_aid_link(element, settings) {
+    // Retrieve URL and text from original <a>
+    const link_text = element.innerText;
+    // Check for visual aid
+    if (link_text.endsWith("^")) {  // Visual aid
+        // Remove caret from link text
+        element.innerText = link_text.substring(0, link_text.length - 1);
+        element.classList.add("visual-aid-link");
+        element.onclick = (event) => set_visual_aid(event, settings);
+    }
 }
 
 async function set_visual_aid(event, settings) {
@@ -62,16 +63,18 @@ async function set_visual_aid(event, settings) {
         formData.append("url", `http://${settings.web_host}/media/img/visual_aids/${settings.remote_images_folder}/${href}`);
         if (!class_list.contains("is-unresolved"))
             // If internal link is resolved, check if we need to upload the file to the visual aid server first
-            await upload_visual_aid(href, settings);
+            if (!await upload_visual_aid(href, settings))
+                return;
     } else if (class_list.contains("external-link")) {
         formData.append("url", href);
     } else {
         console.error(`Invalid classList: ${class_list}`);
     }
-    console.log(formData);
+    console.debug(formData);
     if (event.ctrlKey) {
         set_visual_aid_response(formData.get("url"));
     } else {
+        new Notice(`Sending ${href} to visual aid`);
         await fetch_visual_aid("set_visual_aid", "POST", formData, settings);
     }
 }
@@ -84,39 +87,57 @@ function set_visual_aid_response(url) {
 
 async function upload_visual_aid(filename, settings) {
     const local_path = `${settings.local_images_folder}/${filename}`;
-    console.log(local_path);
+    console.debug(`Local path: ${local_path}`);
     const remote_path = `${settings.remote_images_folder}/${filename}`;
     const abstract_file = app.vault.getAbstractFileByPath(local_path);
-    console.log(abstract_file);
+    console.debug(`Abstract file: ${abstract_file}`);
+    if (abstract_file === null) {
+        new Notice(`"${local_path}" not found`);
+        return false;
+    }
     const content = await app.vault.readBinary(abstract_file);
-    console.log(content);
+    console.debug(content);
     // Check with the webserver if we need to upload the image
     let formData = new FormData();
     formData.append("target_path", remote_path);
     formData.append("image_size", content.byteLength);
     let r = await fetch_visual_aid("check_visual_aid", "POST", formData, settings);
-    console.log(r);
+    console.debug(`Visual aid response: ${r}`);
+    if (r === null) {
+        new Notice("Visual aid call to check_visual_aid failed\nDo you have the correct web host and credentials?");
+        return false;
+    }
     const j = await r.json();
-    console.log(j);
+    console.debug(j);
     if (j["size_matches"])
         // The file exists and is the same size. Don't bother uploading.
         // TODO compare md5 hash
-        return;
+        return true;
+    // Create file object for upload
+    new Notice(`Uploading ${remote_path} to media server...`);
     const image_type = `image/${abstract_file.extension}`
     let blob = new Blob([new Uint8Array(content)],{type: image_type})
-    console.log(blob);
+    console.debug(blob);
     const file = new File([blob], filename,{type: image_type});
-    console.log(file);
+    console.debug(file);
+    // Upload with FormData
     formData = new FormData();
     formData.append("image", file);
     formData.append("target_path", remote_path);
-    await fetch_visual_aid("upload_visual_aid", "PUT", formData, settings);
+    r = await fetch_visual_aid("upload_visual_aid", "PUT", formData, settings);
+    if (r === null) {
+        new Notice(`Visual aid call to upload_visual_aid failed\nDo you have the correct remote path? (${remote_path})`);
+    } else {
+        new Notice(`Done uploading ${remote_path}`);
+    }
+    return true;
 }
 
 async function fetch_visual_aid(url, method, formData, settings) {
+    const long_url = `http://${settings.web_host}/${url}`;
     const credentials = btoa(settings.username + ":" + settings.password);
-    let r = await fetch(
-        `http://${settings.web_host}/${url}`,
+    return fetch(
+        long_url,
         {
             method: method,
             body: formData,
@@ -124,9 +145,14 @@ async function fetch_visual_aid(url, method, formData, settings) {
                 "Authorization": "Basic " + credentials,
             }
         }
-    );
-    console.log('HTTP response code:', r.status);
-    return r;
+    ).then((response) => {
+        console.debug('HTTP response code:', response.status);
+        return response;
+    })
+    .catch((error) => {
+        console.error(error);
+        return null;
+    });
 }
 
 class VisualAidSettingsTab extends obsidian.PluginSettingTab {
