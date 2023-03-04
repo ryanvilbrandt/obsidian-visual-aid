@@ -29,3 +29,21 @@
     height: 100%;
     width: 100%;
 }
+
+#audio-controls-div {
+    display: flex;
+    justify-content: center;
+}
+
+#audio-controls-div > div {
+    width: 5%;
+    background-color: brown;
+    margin: 5px;
+    padding: 5px 5px 0 5px;
+    text-align: center;
+}
+
+#audio-controls-div > div a {
+    width: 10%;
+    color: white;
+}
