@@ -83,10 +83,10 @@ function init_audio_file_block(source, el, ctx, settings) {
         sound_type = "music";
     console.debug(`display_name=${display_name} | filename=${filename} | action=${action} | sound_type=${sound_type}`);
     // Create nodes
-    const blockquote = document.createElement("blockquote");
     if (action === "controls") {
-        blockquote.appendChild(create_audio_controls(settings));
+        el.appendChild(create_audio_controls(settings));
     } else {
+        const blockquote = document.createElement("blockquote");
         const audio_link = document.createElement("a");
         if (action === "load") {
             const play_span = document.createElement("span");
@@ -101,9 +101,8 @@ function init_audio_file_block(source, el, ctx, settings) {
         console.log(audio_link);
         audio_link.onclick = (event) => set_audio_file(event, settings);
         blockquote.appendChild(audio_link);
+        el.appendChild(blockquote);
     }
-    el.appendChild(blockquote);
-    console.log(el.innerHTML);
     console.debug(el);
 }
 
