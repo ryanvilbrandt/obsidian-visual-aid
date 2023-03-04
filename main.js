@@ -62,7 +62,9 @@ function init_audio_file_block(source, el, ctx, settings) {
     const display_name = filename.split(".")[0];
     let action, sound_type;
     // Action: load, play, pause, or stop
-    if (commands.contains("play"))
+    if (commands.contains("controls"))
+        action = "controls";
+    else if (commands.contains("play"))
         action = "play";
     else if (commands.contains("pause"))
         action = "pause";
@@ -82,22 +84,48 @@ function init_audio_file_block(source, el, ctx, settings) {
     console.debug(`display_name=${display_name} | filename=${filename} | action=${action} | sound_type=${sound_type}`);
     // Create nodes
     const blockquote = document.createElement("blockquote");
-    const audio_link = document.createElement("a");
-    if (action === "load") {
-        const play_span = document.createElement("span");
-        play_span.innerHTML = `<strong>Load ${sound_type}:</strong> `;
-        blockquote.appendChild(play_span);
-        audio_link.innerText = display_name;
-        audio_link.href = `${action}|${sound_type}|${filename}`;
+    if (action === "controls") {
+        blockquote.appendChild(create_audio_controls(settings));
     } else {
-        audio_link.innerText = `${toTitleCase(action)} ${sound_type}`;
-        audio_link.href = `${action}|${sound_type}`;
+        const audio_link = document.createElement("a");
+        if (action === "load") {
+            const play_span = document.createElement("span");
+            play_span.innerHTML = `<strong>Load ${sound_type}:</strong> `;
+            blockquote.appendChild(play_span);
+            audio_link.innerText = display_name;
+            audio_link.href = `${action}|${sound_type}|${filename}`;
+        } else {
+            audio_link.innerText = `${toTitleCase(action)} ${sound_type}`;
+            audio_link.href = `${action}|${sound_type}`;
+        }
+        console.log(audio_link);
+        audio_link.onclick = (event) => set_audio_file(event, settings);
+        blockquote.appendChild(audio_link);
     }
-    console.log(audio_link);
-    audio_link.onclick = (event) => set_audio_file(event, settings);
-    blockquote.appendChild(audio_link);
     el.appendChild(blockquote);
+    console.log(el.innerHTML);
     console.debug(el);
+}
+
+
+function create_audio_controls(settings) {
+    const controls_div = document.createElement("div");
+    controls_div.id = "audio-controls-div";
+    const actions = [
+        {"action": "play", "label": "▶️"},
+        {"action": "pause", "label": "⏸️"},
+        {"action": "stop", "label": "⏹️"},
+    ];
+    for (const i in actions) {
+        const control_div = document.createElement("div");
+        const audio_link = document.createElement("a");
+        audio_link.innerText = toTitleCase(actions[i]["label"]);
+        audio_link.href = `${actions[i]["action"]}|all`;
+        audio_link.onclick = (event) => set_audio_file(event, settings);
+        control_div.appendChild(audio_link);
+        controls_div.appendChild(control_div);
+    }
+    return controls_div
 }
 
 
