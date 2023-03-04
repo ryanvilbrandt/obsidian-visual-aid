@@ -181,10 +181,14 @@ async function set_visual_aid(event, settings) {
 async function set_audio_file(event, settings) {
     event.preventDefault();
     event.stopPropagation();
-    console.log(settings);
-    let commands = event.target.href;
+    let target = event.target;
+    if (target.tagName !== "a") {
+        target = target.closest("a");
+    }
+    console.debug(target);
+    let commands = target.href;
     commands = commands.split(document.domain)[1].slice(1).replace(/%7C/g, "|");
-    console.log(commands)
+    console.debug(commands)
     const commands_list = commands.split("|");
     console.log(commands_list);
     let formData = new FormData();
