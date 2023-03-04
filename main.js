@@ -111,9 +111,9 @@ function create_audio_controls(settings) {
     const controls_div = document.createElement("div");
     controls_div.id = "audio-controls-div";
     const actions = [
-        {"action": "play", "label": "▶️"},
-        {"action": "pause", "label": "⏸️"},
-        {"action": "stop", "label": "⏹️"},
+        {"action": "play", "label": "▶"},
+        {"action": "pause", "label": "⏸"},
+        {"action": "stop", "label": "⏹"},
     ];
     for (const i in actions) {
         const control_div = document.createElement("div");
