@@ -151,31 +151,64 @@ function toTitleCase(s) {
 async function set_visual_aid(event, settings) {
     event.preventDefault();
     event.stopPropagation();
-    let formData = new FormData();
-    formData.append("action", "visual_aid");
-    formData.append("player_soundboard", false);
-    formData.append("title", event.altKey ? event.target.innerText : "");
+    let body = {
+        "action": "visual_aid",
+        "player_soundboard": false,
+        "title": event.altKey ? event.target.innerText : ""
+    };
     let href = event.target.getAttribute("href");
     const class_list = event.target.classList;
     if (class_list.contains("internal-link")) {
-        formData.append("url", `http://${settings.web_host}/media/img/visual_aids/${settings.remote_images_folder}/${href}`);
+        body["url"] = `http://${settings.web_host}/media/img/visual_aids/${settings.remote_images_folder}/${href}`;
         if (!class_list.contains("is-unresolved"))
             // If internal link is resolved, check if we need to upload the file to the visual aid server first
             if (!await upload_visual_aid(href, settings))
                 return;
     } else if (class_list.contains("external-link")) {
-        formData.append("url", href);
+        body["url"] = href;
     } else {
         console.error(`Invalid classList: ${class_list}`);
     }
-    console.debug(formData);
+    console.debug(body);
     if (event.ctrlKey) {
-        set_visual_aid_response(formData.get("url"));
+        set_visual_aid_response(body.get("url"));
     } else {
         new Notice(`Sending ${href} to visual aid`);
-        await fetch_visual_aid("set_visual_aid", "POST", formData, settings);
+        await fetch_visual_aid("set_visual_aid", "POST", JSON.stringify(body), settings);
     }
 }
+
+
+async function set_audio_file(event, settings) {
+    event.preventDefault();
+    event.stopPropagation();
+    let target = event.target;
+    if (target.tagName !== "a") {
+        target = target.closest("a");
+    }
+    console.debug(target);
+    let commands = target.href;
+    commands = commands.split(document.domain)[1].slice(1).replace(/%7C/g, "|");
+    console.debug(commands)
+    const commands_list = commands.split("|");
+    console.log(commands_list);
+    let body = {
+        "action": commands_list[0],
+        "target": commands_list[1],
+        "url": null,
+    }
+    if (commands_list.length === 3) {
+        body["url"] = `media/audio/${settings.remote_images_folder}/${commands_list[2]}`;
+    }
+    console.log(body);
+    let r = await fetch_visual_aid("set_visual_aid", "POST", JSON.stringify(body), settings);
+    if (r === null) {
+        new Notice(`Visual aid call to set_visual_aid failed`);
+    } else {
+        new Notice(`Sent ${commands} to visual aid`);
+    }
+}
+
 
 
 async function set_audio_file(event, settings) {
@@ -228,33 +261,27 @@ async function upload_visual_aid(filename, settings) {
     const content = await app.vault.readBinary(abstract_file);
     console.debug(content);
     // Check with the webserver if we need to upload the image
-    let formData = new FormData();
-    formData.append("target_path", remote_path);
-    formData.append("image_size", content.byteLength);
-    let r = await fetch_visual_aid("check_visual_aid", "POST", formData, settings);
-    console.debug(`Visual aid response: ${r}`);
+    let body = {
+        "target_path": remote_path,
+        "image_size": content.byteLength,
+    };
+    let r = await fetch_visual_aid("check_visual_aid", "POST", JSON.stringify(body), settings);
+    console.debug(r);
     if (r === null) {
         new Notice("Visual aid call to check_visual_aid failed\nDo you have the correct web host and credentials?");
         return false;
     }
-    const j = await r.json();
+    const j = r.json;
     console.debug(j);
     if (j["size_matches"])
         // The file exists and is the same size. Don't bother uploading.
         // TODO compare md5 hash
         return true;
-    // Create file object for upload
+    // Create file with metadata to upload
     new Notice(`Uploading ${remote_path} to media server...`);
-    const image_type = `image/${abstract_file.extension}`
-    let blob = new Blob([new Uint8Array(content)],{type: image_type})
-    console.debug(blob);
-    const file = new File([blob], filename,{type: image_type});
-    console.debug(file);
-    // Upload with FormData
-    formData = new FormData();
-    formData.append("image", file);
-    formData.append("target_path", remote_path);
-    r = await fetch_visual_aid("upload_visual_aid", "PUT", formData, settings);
+    const metadata = {"target_path": remote_path};
+    const combinedBuffer = prependMetadataToArrayBuffer(metadata, content);
+    r = await fetch_visual_aid("upload_visual_aid", "PUT", combinedBuffer, settings);
     if (r === null) {
         new Notice(`Visual aid call to upload_visual_aid failed\nDo you have the correct remote path? (${remote_path})`);
     } else {
@@ -263,31 +290,49 @@ async function upload_visual_aid(filename, settings) {
     return true;
 }
 
-async function fetch_visual_aid(url, method, formData, settings) {
-    const long_url = `http://${settings.web_host}/${url}`;
+function prependMetadataToArrayBuffer(metadata, arrayBuffer) {
+    const textEncoder = new TextEncoder();
+    const metadataBuffer = textEncoder.encode(JSON.stringify(metadata) + "\n").buffer;
+    // Combine the original and metadata ArrayBuffer
+    let combinedBuffer = new ArrayBuffer(arrayBuffer.byteLength + metadataBuffer.byteLength);
+    // Create views for the original and metadata buffers
+    let metadataView = new Uint8Array(metadataBuffer);
+    let originalView = new Uint8Array(arrayBuffer);
+    let combinedView = new Uint8Array(combinedBuffer);
+    // Copy the original data into the combined buffer
+    combinedView.set(metadataView, 0);
+    // Inject metadata at the end of the combined buffer
+    combinedView.set(originalView, metadataView.byteLength);
+    return combinedView.buffer;
+}
+
+function convertFileToBase64(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const base64String = reader.result.split(',')[1];
+      resolve(base64String);
+    };
+    reader.onerror = (error) => {
+      reject(error);
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
+async function fetch_visual_aid(url, method, body, settings) {
+    const long_url = `${settings.web_host}/${url}`;
     const credentials = btoa(settings.username + ":" + settings.password);
-    return fetch(
-        long_url,
-        {
-            method: method,
-            body: formData,
-            headers: {
-                "Authorization": "Basic " + credentials,
-            }
+    const params = {
+        url: long_url,
+        method: method,
+        body: body,
+        headers: {
+            "Authorization": "Basic " + credentials,
         }
-    ).then((response) => {
-        if (response.ok) {
-            console.debug('HTTP response code:', response.status);
-            return response;
-        } else {
-            console.error('HTTP error:', response.statusText);
-            return null;
-        }
-    })
-    .catch((error) => {
-        console.error(error);
-        return null;
-    });
+    };
+    console.debug(params);
+    return await obsidian.requestUrl(params);
 }
 
 class VisualAidSettingsTab extends obsidian.PluginSettingTab {
